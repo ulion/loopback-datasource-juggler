@@ -893,6 +893,45 @@ module.exports = function(dataSource, should) {
         });
       });
 
+      it('triggers `before delete` hook with query', function(done) {
+        TestModel.observe('before delete', pushContextAndNext());
+
+        TestModel.deleteAll({ name: existingInstance.name }, function(err) {
+          if (err) return done(err);
+          observedContexts.should.eql(aTestModelCtx({
+             where: { name: existingInstance.name }
+          }));
+          done();
+        });
+      });
+
+      it('triggers `before delete` hook without query', function(done) {
+        TestModel.observe('before delete', pushContextAndNext());
+
+        TestModel.deleteAll(function(err) {
+          if (err) return done(err);
+          observedContexts.should.eql(aTestModelCtx({ where: {} }));
+          done();
+        });
+      });
+
+      it('applies updates from `before delete` hook', function(done) {
+        TestModel.observe('before delete', function(ctx, next) {
+          ctx.where = { id: { neq: existingInstance.id } };
+          next();
+        });
+
+        TestModel.deleteAll(function(err) {
+          if (err) return done(err);
+          findTestModels(function(err, list) {
+            if (err) return done(err);
+            (list || []).map(get('id')).should.eql([existingInstance.id]);
+            done();
+          });
+        });
+      });
+
+
       it('triggers `after delete` hook without query', function(done) {
         TestModel.observe('after delete', pushContextAndNext());
 
@@ -941,6 +980,34 @@ module.exports = function(dataSource, should) {
       it('applies updated from `query` hook', function(done) {
         TestModel.observe('query', function(ctx, next) {
           ctx.query = { where: { id: { neq: existingInstance.id } } };
+          next();
+        });
+
+        existingInstance.delete(function(err) {
+          if (err) return done(err);
+          findTestModels(function(err, list) {
+            if (err) return done(err);
+            (list || []).map(get('id')).should.eql([existingInstance.id]);
+            done();
+          });
+        });
+      });
+
+      it('triggers `before delete` hook', function(done) {
+        TestModel.observe('before delete', pushContextAndNext());
+
+        existingInstance.delete(function(err) {
+          if (err) return done(err);
+          observedContexts.should.eql(aTestModelCtx({
+             where: { id: existingInstance.id }
+          }));
+          done();
+        });
+      });
+
+      it('applies updated from `before delete` hook', function(done) {
+        TestModel.observe('before delete', function(ctx, next) {
+          ctx.where = { id: { neq: existingInstance.id } };
           next();
         });
 
