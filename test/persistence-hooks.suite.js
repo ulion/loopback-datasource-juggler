@@ -931,6 +931,18 @@ module.exports = function(dataSource, should) {
         });
       });
 
+      it('aborts when `before delete` hook fails', function(done) {
+        TestModel.observe('before delete', nextWithError(expectedError));
+
+        TestModel.deleteAll(function(err, list) {
+          [err].should.eql([expectedError]);
+          TestModel.findById(existingInstance.id, function(err, inst) {
+            if (err) return done(err);
+            (inst ? inst.toObject() : 'null').should.eql(existingInstance.toObject());
+            done();
+          });
+        });
+      });
 
       it('triggers `after delete` hook without query', function(done) {
         TestModel.observe('after delete', pushContextAndNext());
@@ -1016,6 +1028,19 @@ module.exports = function(dataSource, should) {
           findTestModels(function(err, list) {
             if (err) return done(err);
             (list || []).map(get('id')).should.eql([existingInstance.id]);
+            done();
+          });
+        });
+      });
+
+      it('aborts when `before delete` hook fails', function(done) {
+        TestModel.observe('before delete', nextWithError(expectedError));
+
+        existingInstance.delete(function(err, list) {
+          [err].should.eql([expectedError]);
+          TestModel.findById(existingInstance.id, function(err, inst) {
+            if (err) return done(err);
+            (inst ? inst.toObject() : 'null').should.eql(existingInstance.toObject());
             done();
           });
         });
