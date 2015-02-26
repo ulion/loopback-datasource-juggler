@@ -7,6 +7,8 @@ module.exports = function(dataSource, should) {
     var TestModel, existingInstance;
     var migrated = false, lastId;
 
+    var undefinedValue = undefined;
+
     beforeEach(function setupDatabase(done) {
       observedContexts = "hook not called";
       expectedError = new Error('test error');
@@ -33,18 +35,23 @@ module.exports = function(dataSource, should) {
     beforeEach(function createTestData(done) {
       TestModel.create({ name: 'first' }, function(err, instance) {
         if (err) return done(err);
-        existingInstance = instance;
 
-        TestModel.create({ name: 'second' }, function(err) {
-          if (err) return done(err);
-          done();
+        // Look it up from DB so that default values are retrieved
+        TestModel.findById(instance.id, function(err, instance) {
+          existingInstance = instance;
+          undefinedValue = existingInstance.extra;
+
+          TestModel.create({ name: 'second' }, function(err) {
+            if (err) return done(err);
+            done();
+          });
         });
       });
     });
 
     describe('PersistedModel.find', function() {
-      it('triggers `query` hook', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.find({ where: { id: '1' } }, function(err, list) {
           if (err) return done(err);
@@ -55,8 +62,8 @@ module.exports = function(dataSource, should) {
         });
       });
 
-      it('aborts when `query` hook fails', function(done) {
-        TestModel.observe('query', nextWithError(expectedError));
+      it('aborts when `access` hook fails', function(done) {
+        TestModel.observe('access', nextWithError(expectedError));
 
         TestModel.find(function(err, list) {
           [err].should.eql([expectedError]);
@@ -64,8 +71,8 @@ module.exports = function(dataSource, should) {
         });
       });
 
-      it('applies updates from `query` hook', function(done) {
-        TestModel.observe('query', function(ctx, next) {
+      it('applies updates from `access` hook', function(done) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query = { where: { id: existingInstance.id } };
           next();
         });
@@ -77,8 +84,8 @@ module.exports = function(dataSource, should) {
         });
       });
 
-      it('triggers `query` hook for geo queries', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook for geo queries', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.find({ where: { geo: { near: '10,20' }}}, function(err, list) {
           if (err) return done(err);
@@ -89,8 +96,8 @@ module.exports = function(dataSource, should) {
         });
       });
 
-      it('applies updates from `query` hook for geo queries', function(done) {
-        TestModel.observe('query', function(ctx, next) {
+      it('applies updates from `access` hook for geo queries', function(done) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query = { where: { id: existingInstance.id } };
           next();
         });
@@ -145,15 +152,19 @@ module.exports = function(dataSource, should) {
         TestModel.observe('before save', pushContextAndNext());
 
         TestModel.create(
-          [{ name: 'one' }, { name: 'two' }],
+          [{ name: '1' }, { name: '2' }],
           function(err, list) {
             if (err) return done(err);
+            // Creation of multiple instances is executed in parallel
+            observedContexts.sort(function(c1, c2) {
+              return c1.instance.name - c2.instance.name;
+            });
             observedContexts.should.eql([
               aTestModelCtx({
-                instance: { id: list[0].id, name: 'one', extra: undefined }
+                instance: { id: list[0].id, name: '1', extra: undefined }
               }),
               aTestModelCtx({
-                instance: { id: list[1].id, name: 'two', extra: undefined  }
+                instance: { id: list[1].id, name: '2', extra: undefined  }
                }),
             ]);
             done();
@@ -211,15 +222,19 @@ module.exports = function(dataSource, should) {
         TestModel.observe('after save', pushContextAndNext());
 
         TestModel.create(
-          [{ name: 'one' }, { name: 'two' }],
+          [{ name: '1' }, { name: '2' }],
           function(err, list) {
             if (err) return done(err);
+            // Creation of multiple instances is executed in parallel
+            observedContexts.sort(function(c1, c2) {
+              return c1.instance.name - c2.instance.name;
+            });
             observedContexts.should.eql([
               aTestModelCtx({
-                instance: { id: list[0].id, name: 'one', extra: undefined }
+                instance: { id: list[0].id, name: '1', extra: undefined }
               }),
               aTestModelCtx({
-                instance: { id: list[1].id, name: 'two', extra: undefined }
+                instance: { id: list[1].id, name: '2', extra: undefined }
               }),
             ]);
             done();
@@ -256,8 +271,8 @@ module.exports = function(dataSource, should) {
     });
 
     describe('PersistedModel.findOrCreate', function() {
-      it('triggers `query` hook', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.findOrCreate(
           { where: { name: 'new-record' } },
@@ -274,26 +289,25 @@ module.exports = function(dataSource, should) {
           });
       });
 
-      // TODO(bajtos) Enable this test for all connectors that
-      // provide optimized implementation of findOrCreate.
-      // The unoptimized implementation does not trigger the hook
-      // when an existing model was found.
-      it.skip('triggers `before save` hook when found', function(done) {
-        TestModel.observe('before save', pushContextAndNext());
+      if (dataSource.connector.findOrCreate) {
+        it('triggers `before save` hook when found', function(done) {
+          TestModel.observe('before save', pushContextAndNext());
 
-        TestModel.findOrCreate(
-          { where: { name: existingInstance.name } },
-          { name: existingInstance.name },
-          function(err, record, created) {
-            if (err) return done(err);
-            observedContexts.should.eql(aTestModelCtx({ instance: {
-              id: record.id,
-              name: existingInstance.name,
-              extra: undefined
-            }}));
-            done();
-          });
-      });
+          TestModel.findOrCreate(
+            { where: { name: existingInstance.name } },
+            { name: existingInstance.name },
+            function(err, record, created) {
+              if (err) return done(err);
+              record.id.should.eql(existingInstance.id);
+              observedContexts.should.eql(aTestModelCtx({ instance: {
+                id: getLastGeneratedUid(),
+                name: existingInstance.name,
+                extra: undefined
+              }}));
+              done();
+            });
+        });
+      }
 
       it('triggers `before save` hook when not found', function(done) {
         TestModel.observe('before save', pushContextAndNext());
@@ -339,7 +353,7 @@ module.exports = function(dataSource, should) {
           function(err, record, created) {
             if (err) return done(err);
             triggered.should.eql([
-              'query',
+              'access',
               'before save',
               'after save'
             ]);
@@ -347,8 +361,8 @@ module.exports = function(dataSource, should) {
           });
       });
 
-      it('aborts when `query` hook fails', function(done) {
-        TestModel.observe('query', nextWithError(expectedError));
+      it('aborts when `access` hook fails', function(done) {
+        TestModel.observe('access', nextWithError(expectedError));
 
         TestModel.findOrCreate(
           { where: { id: 'does-not-exist' } },
@@ -403,8 +417,8 @@ module.exports = function(dataSource, should) {
     });
 
     describe('PersistedModel.count', function(done) {
-      it('triggers `query` hook', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.count({ id: existingInstance.id }, function(err, count) {
           if (err) return done(err);
@@ -415,8 +429,8 @@ module.exports = function(dataSource, should) {
         });
       });
 
-      it('applies updates from `query` hook', function(done) {
-        TestModel.observe('query', function(ctx, next) {
+      it('applies updates from `access` hook', function(done) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query.where = { id: existingInstance.id };
           next();
         });
@@ -614,8 +628,8 @@ module.exports = function(dataSource, should) {
     });
 
     describe('PersistedModel.updateOrCreate', function() {
-      it('triggers `query` hook on create', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook on create', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.updateOrCreate(
           { id: 'not-found', name: 'not found' },
@@ -628,8 +642,8 @@ module.exports = function(dataSource, should) {
           });
       });
 
-      it('triggers `query` hook on update', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook on update', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.updateOrCreate(
           { id: existingInstance.id, name: 'new name' },
@@ -642,8 +656,8 @@ module.exports = function(dataSource, should) {
           });
       });
 
-      it('does not trigger `query` on missing id', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('does not trigger `access` on missing id', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.updateOrCreate(
           { name: 'new name' },
@@ -654,8 +668,8 @@ module.exports = function(dataSource, should) {
           });
       });
 
-      it('applies updates from `query` hook when found', function(done) {
-        TestModel.observe('query', function(ctx, next) {
+      it('applies updates from `access` hook when found', function(done) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query = { where: { id: { neq: existingInstance.id } } };
           next();
         });
@@ -675,8 +689,8 @@ module.exports = function(dataSource, should) {
         });
       });
 
-      it('applies updates from `query` hook when not found', function(done) {
-        TestModel.observe('query', function(ctx, next) {
+      it('applies updates from `access` hook when not found', function(done) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query = { where: { id: 'not-found' } };
           next();
         });
@@ -698,10 +712,10 @@ module.exports = function(dataSource, should) {
       });
 
       it('triggers hooks only once', function(done) {
-        TestModel.observe('query', pushNameAndNext('query'));
+        TestModel.observe('access', pushNameAndNext('access'));
         TestModel.observe('before save', pushNameAndNext('before save'));
 
-        TestModel.observe('query', function(ctx, next) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query = { where: { id: { neq: existingInstance.id } } };
           next();
         });
@@ -710,7 +724,7 @@ module.exports = function(dataSource, should) {
           { id: 'ignored', name: 'new name' },
           function(err, instance) {
             if (err) return done(err);
-            observersCalled.should.eql(['query', 'before save']);
+            observersCalled.should.eql(['access', 'before save']);
             done();
           });
       });
@@ -855,8 +869,8 @@ module.exports = function(dataSource, should) {
     });
 
     describe('PersistedModel.deleteAll', function() {
-      it('triggers `query` hook with query', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook with query', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.deleteAll({ name: existingInstance.name }, function(err) {
           if (err) return done(err);
@@ -867,8 +881,8 @@ module.exports = function(dataSource, should) {
         });
       });
 
-      it('triggers `query` hook without query', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook without query', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.deleteAll(function(err) {
           if (err) return done(err);
@@ -877,8 +891,8 @@ module.exports = function(dataSource, should) {
         });
       });
 
-      it('applies updates from `query` hook', function(done) {
-        TestModel.observe('query', function(ctx, next) {
+      it('applies updates from `access` hook', function(done) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query = { where: { id: { neq: existingInstance.id } } };
           next();
         });
@@ -888,6 +902,58 @@ module.exports = function(dataSource, should) {
           findTestModels(function(err, list) {
             if (err) return done(err);
             (list || []).map(get('id')).should.eql([existingInstance.id]);
+            done();
+          });
+        });
+      });
+
+      it('triggers `before delete` hook with query', function(done) {
+        TestModel.observe('before delete', pushContextAndNext());
+
+        TestModel.deleteAll({ name: existingInstance.name }, function(err) {
+          if (err) return done(err);
+          observedContexts.should.eql(aTestModelCtx({
+             where: { name: existingInstance.name }
+          }));
+          done();
+        });
+      });
+
+      it('triggers `before delete` hook without query', function(done) {
+        TestModel.observe('before delete', pushContextAndNext());
+
+        TestModel.deleteAll(function(err) {
+          if (err) return done(err);
+          observedContexts.should.eql(aTestModelCtx({ where: {} }));
+          done();
+        });
+      });
+
+      it('applies updates from `before delete` hook', function(done) {
+        TestModel.observe('before delete', function(ctx, next) {
+          ctx.where = { id: { neq: existingInstance.id } };
+          next();
+        });
+
+        TestModel.deleteAll(function(err) {
+          if (err) return done(err);
+          findTestModels(function(err, list) {
+            if (err) return done(err);
+            (list || []).map(get('id')).should.eql([existingInstance.id]);
+            done();
+          });
+        });
+      });
+
+      it('aborts when `before delete` hook fails', function(done) {
+        TestModel.observe('before delete', nextWithError(expectedError));
+
+        TestModel.deleteAll(function(err, list) {
+          [err].should.eql([expectedError]);
+          TestModel.findById(existingInstance.id, function(err, inst) {
+            if (err) return done(err);
+            (inst ? inst.toObject() : 'null').should.
+              eql(existingInstance.toObject());
             done();
           });
         });
@@ -926,8 +992,8 @@ module.exports = function(dataSource, should) {
     });
 
     describe('PersistedModel.prototype.delete', function() {
-      it('triggers `query` hook', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         existingInstance.delete(function(err) {
           if (err) return done(err);
@@ -938,8 +1004,8 @@ module.exports = function(dataSource, should) {
         });
       });
 
-      it('applies updated from `query` hook', function(done) {
-        TestModel.observe('query', function(ctx, next) {
+      it('applies updated from `access` hook', function(done) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query = { where: { id: { neq: existingInstance.id } } };
           next();
         });
@@ -949,6 +1015,48 @@ module.exports = function(dataSource, should) {
           findTestModels(function(err, list) {
             if (err) return done(err);
             (list || []).map(get('id')).should.eql([existingInstance.id]);
+            done();
+          });
+        });
+      });
+
+      it('triggers `before delete` hook', function(done) {
+        TestModel.observe('before delete', pushContextAndNext());
+
+        existingInstance.delete(function(err) {
+          if (err) return done(err);
+          observedContexts.should.eql(aTestModelCtx({
+             where: { id: existingInstance.id }
+          }));
+          done();
+        });
+      });
+
+      it('applies updated from `before delete` hook', function(done) {
+        TestModel.observe('before delete', function(ctx, next) {
+          ctx.where = { id: { neq: existingInstance.id } };
+          next();
+        });
+
+        existingInstance.delete(function(err) {
+          if (err) return done(err);
+          findTestModels(function(err, list) {
+            if (err) return done(err);
+            (list || []).map(get('id')).should.eql([existingInstance.id]);
+            done();
+          });
+        });
+      });
+
+      it('aborts when `before delete` hook fails', function(done) {
+        TestModel.observe('before delete', nextWithError(expectedError));
+
+        existingInstance.delete(function(err, list) {
+          [err].should.eql([expectedError]);
+          TestModel.findById(existingInstance.id, function(err, inst) {
+            if (err) return done(err);
+            (inst ? inst.toObject() : 'null').should.eql(
+              existingInstance.toObject());
             done();
           });
         });
@@ -988,24 +1096,24 @@ module.exports = function(dataSource, should) {
       });
 
       it('triggers hooks only once', function(done) {
-        TestModel.observe('query', pushNameAndNext('query'));
+        TestModel.observe('access', pushNameAndNext('access'));
         TestModel.observe('after delete', pushNameAndNext('after delete'));
-        TestModel.observe('query', function(ctx, next) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query = { where: { id: { neq: existingInstance.id } } };
           next();
         });
 
         existingInstance.delete(function(err) {
           if (err) return done(err);
-          observersCalled.should.eql(['query', 'after delete']);
+          observersCalled.should.eql(['access', 'after delete']);
           done();
         });
       });
     });
 
     describe('PersistedModel.updateAll', function() {
-      it('triggers `query` hook', function(done) {
-        TestModel.observe('query', pushContextAndNext());
+      it('triggers `access` hook', function(done) {
+        TestModel.observe('access', pushContextAndNext());
 
         TestModel.updateAll(
           { name: 'searched' },
@@ -1019,8 +1127,8 @@ module.exports = function(dataSource, should) {
           });
       });
 
-      it('applies updates from `query` hook', function(done) {
-        TestModel.observe('query', function(ctx, next) {
+      it('applies updates from `access` hook', function(done) {
+        TestModel.observe('access', function(ctx, next) {
           ctx.query = { where: { id: { neq: existingInstance.id } } };
           next();
         });
@@ -1158,10 +1266,18 @@ module.exports = function(dataSource, should) {
       lastId += 1;
       return '' + lastId;
     }
+
+    function getLastGeneratedUid() {
+      return '' + lastId;
+    }
   });
 
   function deepCloneToObject(obj) {
     return traverse(obj).map(function(x) {
+      if (x === undefined) {
+        // RDBMSs return null
+        return null;
+      }
       if (x && x.toObject)
         return x.toObject(true);
       if (x && typeof x === 'function' && x.modelName)
