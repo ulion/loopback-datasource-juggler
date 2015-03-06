@@ -1,4 +1,36 @@
-2015-02-21, Version 2.18.1
+2015-03-05, Version 2.19.2
+==========================
+
+ * Improved and corrected API docs (crandmck)
+
+ * Fix problems in annotations that prvented validateAsync and validate functions from appearing in API docs. (crandmck)
+
+
+2015-03-03, Version 2.19.1
+==========================
+
+ * Make sure inclusion filter is applied to the target model (Raymond Feng)
+
+
+2015-03-02, Version 2.19.0
+==========================
+
+ * Deprecate DAO events (Miroslav Bajtoš)
+
+ * Deprecate Model hooks (Miroslav Bajtoš)
+
+ * Add Promises to DAO (Partap Davis)
+
+ * test for updateAll (rudzon)
+
+ * enhance the coercion for boolean/date types (rudzon)
+
+ * enhance updateAll to coerce the data per property definitions (rudzon)
+
+ * relation-definition: remove trailing whitespace (Miroslav Bajtoš)
+
+
+2015-02-20, Version 2.18.1
 ==========================
 
  * Make sure models are migrated to avoid conflicts (Raymond Feng)
